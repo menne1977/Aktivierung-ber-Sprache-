@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var adapter: AppAdapter
     private lateinit var statusView: TextView
     private lateinit var startStop: Button
+    private var modelMsg = ""
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -169,6 +170,8 @@ class MainActivity : Activity() {
     private fun refreshStatus() {
         fun ok(b: Boolean) = if (b) "✓" else "✗"
         statusView.text = "Mikrofon ${ok(micGranted())}    Bedienungshilfe ${ok(a11yEnabled())}    Überlagerung ${ok(Settings.canDrawOverlays(this))}"
+        val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start geladen)"
+        statusView.text = statusView.text.toString() + "\n" + model
         startStop.text = if (VoiceService.running) "Sprachsteuerung stoppen" else "Sprachsteuerung starten"
     }
 
@@ -195,6 +198,17 @@ class MainActivity : Activity() {
             window.decorView.postDelayed({ refreshStatus() }, 400)
         } else if (!micGranted()) {
             askRuntimePermissions()
+        } else if (!ModelManager.ready(this)) {
+            if (!ModelManager.downloading) {
+                modelMsg = "Sprachmodell wird geladen: 0 %"
+                refreshStatus()
+                ModelManager.download(this, { m -> runOnUiThread { modelMsg = m; refreshStatus() } }) { ok ->
+                    runOnUiThread {
+                        refreshStatus()
+                        if (ok) startServiceNow() else statusView.text = "Download fehlgeschlagen. Internet prüfen und erneut starten."
+                    }
+                }
+            }
         } else {
             startServiceNow()
         }
