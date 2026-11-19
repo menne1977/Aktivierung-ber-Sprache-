@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DTM Voice</string>
+    <string name="a11y_description">Erlaubt DTM Voice, per Sprachbefehl Apps zu schließen und in Apps zu tippen, zu scrollen und zu schreiben.</string>
+</resources>
