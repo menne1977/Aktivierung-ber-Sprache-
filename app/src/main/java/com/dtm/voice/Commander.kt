@@ -39,6 +39,13 @@ object Commander {
         if (t.isBlank()) return
         fun has(vararg k: String) = k.any { t.contains(it) }
         val a11y = VoiceAccessibilityService.instance
+        // Bedienbefehle (tippen, scrollen, schreiben) nur in Apps mit AN-Schalter
+        val fg = VoiceAccessibilityService.lastPkg
+        val inAppBlocked = fg != null && fg in Prefs.disabled(ctx)
+        fun guardedInApp(): Boolean {
+            if (inAppBlocked) { reply("${fg} ist gesperrt"); return false }
+            return true
+        }
 
         // --- Hilfe / Dienst ---
         if (has("hilfe", "was kann ich sagen")) { reply(HELP); return }
@@ -63,6 +70,7 @@ object Commander {
         if (has("letzte apps", "übersicht", "zuletzt")) { if (a11y?.recents() == true) reply("Übersicht") else reply(NO_A11Y); return }
         if (has("scroll", "blätter", "runter", "nach unten", "nach oben") || t == "hoch") {
             if (a11y == null) { reply(NO_A11Y); return }
+            if (!guardedInApp()) return
             val fwd = has("runter", "unten")
             reply(if (a11y.scroll(fwd)) (if (fwd) "Runter" else "Hoch") else "Nichts zum Scrollen")
             return
@@ -77,12 +85,14 @@ object Commander {
         // --- Schreiben ---
         after(t, WRITE)?.let {
             if (a11y == null) { reply(NO_A11Y); return }
+            if (!guardedInApp()) return@let
             reply(if (a11y.typeText(it, false)) "Geschrieben" else "Kein Textfeld gefunden")
             return
         }
         after(t, listOf("suche", "suche nach"))?.let {
             if (it.isBlank()) return@let
             if (a11y == null) { reply(NO_A11Y); return }
+            if (!guardedInApp()) return@let
             reply(if (a11y.typeText(it, true)) "Suche $it" else "Kein Suchfeld gefunden")
             return
         }
@@ -92,6 +102,7 @@ object Commander {
             val target = stripFiller(it)
             if (target.isBlank()) return@let
             if (a11y == null) { reply(NO_A11Y); return }
+            if (!guardedInApp()) return@let
             reply(if (a11y.clickText(target)) "Getippt: $target" else "Nicht gefunden: $target")
             return
         }
