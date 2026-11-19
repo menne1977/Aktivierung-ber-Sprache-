@@ -94,6 +94,9 @@ class MainActivity : Activity() {
         box.addView(button("2. Bedienungshilfe aktivieren") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
+        box.addView(button("2a. Eingeschränkte Einstellungen freigeben (App-Info)") {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        })
         box.addView(button("3. Über anderen Apps einblenden erlauben") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
