@@ -170,7 +170,7 @@ class MainActivity : Activity() {
     private fun refreshStatus() {
         fun ok(b: Boolean) = if (b) "✓" else "✗"
         statusView.text = "Mikrofon ${ok(micGranted())}    Bedienungshilfe ${ok(a11yEnabled())}    Überlagerung ${ok(Settings.canDrawOverlays(this))}"
-        val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start geladen)"
+        val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start eingerichtet)"
         statusView.text = statusView.text.toString() + "\n" + model
         startStop.text = if (VoiceService.running) "Sprachsteuerung stoppen" else "Sprachsteuerung starten"
     }
@@ -200,12 +200,12 @@ class MainActivity : Activity() {
             askRuntimePermissions()
         } else if (!ModelManager.ready(this)) {
             if (!ModelManager.downloading) {
-                modelMsg = "Sprachmodell wird geladen: 0 %"
+                modelMsg = "Sprachmodell wird eingerichtet …"
                 refreshStatus()
                 ModelManager.download(this, { m -> runOnUiThread { modelMsg = m; refreshStatus() } }) { ok ->
                     runOnUiThread {
                         refreshStatus()
-                        if (ok) startServiceNow() else statusView.text = "Download fehlgeschlagen. Internet prüfen und erneut starten."
+                        if (ok) startServiceNow() else statusView.text = "Sprachmodell konnte nicht eingerichtet werden. Speicherplatz prüfen und erneut starten."
                     }
                 }
             }

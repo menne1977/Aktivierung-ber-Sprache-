@@ -11,6 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Sprachmodell in die APK packen
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fL --retry 3 -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip
+          unzip -q model.zip -d app/src/main/assets
+          rm model.zip
+          ls app/src/main/assets/vosk-model-small-de-0.15
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

@@ -3,14 +3,9 @@ package com.dtm.voice
 import android.content.Context
 import org.vosk.Model
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.zip.ZipInputStream
 
-/** Kleines deutsches Offline-Sprachmodell (ca. 45 MB), einmalig geladen. Danach braucht das Aktivierungswort kein Internet mehr. */
+/** Deutsches Offline-Sprachmodell steckt in der APK und wird beim ersten Start einmal entpackt. Kein Internet noetig. */
 object ModelManager {
-    private const val URL_ZIP = "https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip"
     private const val DIR = "vosk-model-small-de-0.15"
 
     @Volatile var downloading = false
@@ -26,45 +21,31 @@ object ModelManager {
         return model
     }
 
+    private fun copy(c: Context, asset: String, target: File) {
+        val list = c.assets.list(asset)
+        if (list != null && list.isNotEmpty()) {
+            target.mkdirs()
+            for (n in list) copy(c, "$asset/$n", File(target, n))
+        } else {
+            target.parentFile?.mkdirs()
+            c.assets.open(asset).use { i -> target.outputStream().use { o -> i.copyTo(o) } }
+        }
+    }
+
+    /** Name bleibt "download" fuer MainActivity; entpackt nur die mitgelieferten Dateien. */
     fun download(c: Context, progress: (String) -> Unit, done: (Boolean) -> Unit) {
         if (downloading) return
         downloading = true
         Thread {
             var ok = false
             try {
+                progress("Sprachmodell wird eingerichtet (einmalig, ca. 1 Minute) …")
                 val root = File(c.filesDir, "vosk")
-                root.mkdirs()
-                val conn = URL(URL_ZIP).openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                val total = conn.contentLength.toLong()
-                var read = 0L
-                var lastPct = -1
-                ZipInputStream(conn.inputStream.buffered()).use { zin ->
-                    var e = zin.nextEntry
-                    val buf = ByteArray(64 * 1024)
-                    while (e != null) {
-                        val out = File(root, e.name)
-                        if (!out.canonicalPath.startsWith(root.canonicalPath)) throw SecurityException("zip")
-                        if (e.isDirectory) out.mkdirs() else {
-                            out.parentFile?.mkdirs()
-                            FileOutputStream(out).use { fo ->
-                                while (true) {
-                                    val n = zin.read(buf)
-                                    if (n < 0) break
-                                    fo.write(buf, 0, n)
-                                    read += n
-                                    if (total > 0) {
-                                        val pct = (read * 100 / total).toInt().coerceAtMost(99)
-                                        if (pct != lastPct) { lastPct = pct; progress("Sprachmodell wird geladen: $pct %") }
-                                    }
-                                }
-                            }
-                        }
-                        e = zin.nextEntry
-                    }
-                }
-                ok = ready(c)
+                val tmp = File(root, "tmp")
+                tmp.deleteRecursively()
+                copy(c, DIR, tmp)
+                dir(c).deleteRecursively()
+                ok = tmp.renameTo(dir(c)) && ready(c)
             } catch (_: Exception) {
                 ok = false
             }
