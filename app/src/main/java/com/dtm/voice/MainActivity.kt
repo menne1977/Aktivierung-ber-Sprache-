@@ -97,9 +97,26 @@ class MainActivity : Activity() {
         box.addView(button("2a. Eingeschränkte Einstellungen freigeben (App-Info)") {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         })
+        box.addView(text("Ist der Schalter bei Bedienungshilfe grau oder „eingeschränkt“? Dann 2a drücken, oben rechts ⋮ antippen, „Eingeschränkte Einstellungen zulassen“ wählen und danach Schritt 2 wiederholen.", 13f, DIM))
         box.addView(button("3. Über anderen Apps einblenden erlauben") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
+
+        // Befehl ohne Sprache testen
+        box.addView(text("Befehl testen (ohne Sprache)", 16f).apply { setPadding(0, dp(16), 0, 0) })
+        val test = EditText(this).apply {
+            hint = "z. B. Spotify öffnen"
+            setHintTextColor(DIM)
+            setTextColor(FG)
+            setSingleLine()
+        }
+        box.addView(test)
+        val testResult = text("", 14f, DIM)
+        box.addView(button("Befehl ausführen") {
+            val c = test.text.toString()
+            if (c.isNotBlank()) Commander.run(this, c) { r -> runOnUiThread { testResult.text = "Antwort: $r" } }
+        })
+        box.addView(testResult)
 
         // Aktivierungswort
         box.addView(text("Aktivierungswort", 16f).apply { setPadding(0, dp(16), 0, 0) })
@@ -175,6 +192,7 @@ class MainActivity : Activity() {
         statusView.text = "Mikrofon ${ok(micGranted())}    Bedienungshilfe ${ok(a11yEnabled())}    Überlagerung ${ok(Settings.canDrawOverlays(this))}"
         val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start eingerichtet)"
         statusView.text = statusView.text.toString() + "\n" + model
+        if (VoiceService.lastHeard.isNotEmpty()) statusView.text = statusView.text.toString() + "\nZuletzt gehört: " + VoiceService.lastHeard + " → " + VoiceService.lastReply
         startStop.text = if (VoiceService.running) "Sprachsteuerung stoppen" else "Sprachsteuerung starten"
     }
 

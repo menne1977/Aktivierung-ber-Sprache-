@@ -12,28 +12,31 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Macht die eigentliche Arbeit in fremden Apps: App beenden (Einstellungen -> "Beenden erzwingen"),
- * Klicken, Scrollen, Schreiben, Zurueck/Home/Uebersicht.
+ * Macht die Arbeit in fremden Apps: App beenden (Einstellungen -> "Beenden erzwingen"),
+ * Tippen, Scrollen, Schreiben, Zurueck/Home/Uebersicht.
  */
 class VoiceAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: VoiceAccessibilityService? = null
-        /** Zuletzt im Vordergrund gesehene normale App (null = Startbildschirm). */
         @Volatile var lastPkg: String? = null
 
-        private val FORCE = listOf("Beenden erzwingen", "Erzwingen beenden", "Force stop", "Anhalten erzwingen")
-        private val CONFIRM = listOf("OK", "Ok", "Beenden erzwingen", "Force stop", "Beenden")
-        private val CLEAR_ALL = listOf("Alle schließen", "Alle löschen", "Alle entfernen", "Close all", "Clear all", "Alles löschen")
+        // Texte je nach Hersteller (Pixel, Samsung, Xiaomi, Motorola ...)
+        private val FORCE = listOf(
+            "Beenden erzwingen", "Stopp erzwingen", "Stoppen erzwingen", "Erzwingen beenden",
+            "Erzwungenes Beenden", "Anhalten erzwingen", "Force stop", "Stopp erzw."
+        )
+        private val CONFIRM = listOf("OK", "Ok", "Beenden erzwingen", "Stopp erzwingen", "Stoppen erzwingen", "Force stop", "Beenden", "Stoppen")
+        private val CLEAR_ALL = listOf("Alle schließen", "Alle löschen", "Alle entfernen", "Alles löschen", "Alles schließen", "Close all", "Clear all")
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var launcherPkg: String? = null
+    private var homePkgs: Set<String> = emptySet()
 
     override fun onServiceConnected() {
         instance = this
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        launcherPkg = packageManager.resolveActivity(i, 0)?.activityInfo?.packageName
+        homePkgs = packageManager.queryIntentActivities(i, 0).map { it.activityInfo.packageName }.toSet()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -41,12 +44,17 @@ class VoiceAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
+    override fun onDestroy() {
+        instance = null
+        super.onDestroy()
+    }
+
     override fun onInterrupt() {}
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         if (e == null || e.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val p = e.packageName?.toString() ?: return
-        if (p == launcherPkg) { lastPkg = null; return }
+        if (p in homePkgs) { lastPkg = null; return }
         if (isIgnored(p)) return
         lastPkg = p
     }
@@ -54,7 +62,17 @@ class VoiceAccessibilityService : AccessibilityService() {
     private fun isIgnored(p: String): Boolean =
         p == packageName || p == "android" || p.startsWith("com.android.systemui") ||
             p == "com.android.settings" || p.contains("inputmethod") || p.contains("keyboard") ||
-            p == "com.google.android.googlequicksearchbox"
+            p.contains("honeyboard") || p == "com.google.android.googlequicksearchbox"
+
+    /** App, die gerade im Vordergrund ist (null = Startbildschirm). */
+    fun currentPkg(): String? {
+        val p = try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+        if (p != null) {
+            if (p in homePkgs) return null
+            if (!isIgnored(p)) return p
+        }
+        return lastPkg
+    }
 
     // ---------- Aktionen ----------
 
@@ -64,7 +82,8 @@ class VoiceAccessibilityService : AccessibilityService() {
 
     fun clickText(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
-        return clickAny(root, listOf(text))
+        // zuerst exakt, dann Wortanfang gross geschrieben
+        return clickAny(root, listOf(text, text.replaceFirstChar { it.uppercase() }))
     }
 
     fun scroll(forward: Boolean): Boolean {
@@ -77,7 +96,8 @@ class VoiceAccessibilityService : AccessibilityService() {
 
     fun typeText(text: String, enter: Boolean): Boolean {
         val root = rootInActiveWindow ?: return false
-        val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: findEditable(root) ?: return false
+        val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable } ?: findEditable(root) ?: return false
+        field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
@@ -88,39 +108,47 @@ class VoiceAccessibilityService : AccessibilityService() {
         return ok
     }
 
-    /** Oeffnet die App-Info der App und tippt auf "Beenden erzwingen" + OK. */
+    /** Oeffnet die App-Info und tippt "Beenden erzwingen" + OK, danach zurueck. */
     fun forceStop(pkg: String, done: (Boolean) -> Unit) {
         try {
-            val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(i)
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+            )
         } catch (e: Exception) {
             done(false); return
         }
         var step = 0
         var tries = 0
+        var finished = false
+        fun finish(ok: Boolean) {
+            if (finished) return
+            finished = true
+            handler.postDelayed({ back() }, 350)
+            done(ok)
+        }
         val r = object : Runnable {
             override fun run() {
                 tries++
                 val root = rootInActiveWindow
                 if (root != null) {
                     if (step == 0) {
-                        if (clickAny(root, FORCE)) step = 1
-                    } else if (clickAny(root, CONFIRM)) {
-                        handler.postDelayed({ back() }, 400)
-                        done(true)
-                        return
+                        when (findButton(root, FORCE)) {
+                            ButtonState.ENABLED -> { if (clickAny(root, FORCE)) step = 1 }
+                            ButtonState.DISABLED -> { finish(false); return }   // App laeuft gar nicht
+                            ButtonState.NONE -> {}
+                        }
+                    } else {
+                        if (clickAny(root, CONFIRM)) { finish(true); return }
+                        // manche Handys fragen nicht nach: Knopf ist dann schon grau
+                        if (tries > 8 && findButton(root, FORCE) == ButtonState.DISABLED) { finish(true); return }
                     }
                 }
-                if (tries > 25) {
-                    back()
-                    done(false)
-                    return
-                }
-                handler.postDelayed(this, 350)
+                if (tries > 25) { finish(step == 1); return }
+                handler.postDelayed(this, 300)
             }
         }
-        handler.postDelayed(r, 800)
+        handler.postDelayed(r, 700)
     }
 
     /** Uebersicht oeffnen und "Alle schliessen" druecken. */
@@ -136,40 +164,62 @@ class VoiceAccessibilityService : AccessibilityService() {
                     done(true)
                     return
                 }
-                if (tries > 8) {
+                if (tries > 10) {
                     home()
                     done(false)
                     return
                 }
-                handler.postDelayed(this, 350)
+                handler.postDelayed(this, 300)
             }
         }
-        handler.postDelayed(r, 900)
+        handler.postDelayed(r, 800)
     }
 
     // ---------- Hilfsfunktionen ----------
 
+    private enum class ButtonState { NONE, ENABLED, DISABLED }
+
+    /** Klickbares Element zu einem Text: das Element selbst oder ein Elternelement. */
+    private fun clickTarget(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var cur: AccessibilityNodeInfo? = n
+        var depth = 0
+        while (cur != null && depth < 6) {
+            if (cur.isClickable) return cur
+            cur = cur.parent
+            depth++
+        }
+        return null
+    }
+
+    private fun findButton(root: AccessibilityNodeInfo, texts: List<String>): ButtonState {
+        var seen = false
+        for (t in texts) {
+            for (n in root.findAccessibilityNodeInfosByText(t) ?: continue) {
+                val target = clickTarget(n) ?: continue
+                seen = true
+                if (target.isEnabled && n.isEnabled) return ButtonState.ENABLED
+            }
+        }
+        return if (seen) ButtonState.DISABLED else ButtonState.NONE
+    }
+
     private fun clickAny(root: AccessibilityNodeInfo, texts: List<String>): Boolean {
         for (t in texts) {
             val nodes = root.findAccessibilityNodeInfosByText(t) ?: continue
-            for (n in nodes) {
-                var cur: AccessibilityNodeInfo? = n
-                var depth = 0
-                while (cur != null && depth < 6) {
-                    if (cur.isClickable && cur.isEnabled) {
-                        if (cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-                        break
-                    }
-                    cur = cur.parent
-                    depth++
-                }
+            // exakte Treffer zuerst
+            val sorted = nodes.sortedBy { if (it.text?.toString()?.equals(t, true) == true || it.contentDescription?.toString()?.equals(t, true) == true) 0 else 1 }
+            for (n in sorted) {
+                if (!n.isEnabled) continue
+                val target = clickTarget(n) ?: continue
+                if (!target.isEnabled) continue
+                if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             }
         }
         return false
     }
 
     private fun findScrollable(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (n.isScrollable) return n
+        if (n.isScrollable && n.isVisibleToUser) return n
         for (i in 0 until n.childCount) {
             val c = n.getChild(i) ?: continue
             findScrollable(c)?.let { return it }
@@ -178,7 +228,7 @@ class VoiceAccessibilityService : AccessibilityService() {
     }
 
     private fun findEditable(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (n.isEditable) return n
+        if (n.isEditable && n.isVisibleToUser) return n
         for (i in 0 until n.childCount) {
             val c = n.getChild(i) ?: continue
             findEditable(c)?.let { return it }

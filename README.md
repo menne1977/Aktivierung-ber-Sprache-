@@ -11,12 +11,12 @@ Android-App, die Apps per Sprache öffnen, schließen und bedienen kann. Gedacht
 6. **Sprachsteuerung starten**.
 
 ## Bedienung
-Zuerst das Aktivierungswort (Standard: **"Hey Titan"**, in der App änderbar), dann der Befehl. Entweder im selben Satz ("Hey Titan, schließe Spotify") oder getrennt: Aktivierungswort, Piepton, dann innerhalb von 8 Sekunden den Befehl.
+Die App hört dauerhaft offline **nur** auf das Aktivierungswort (Standard: **"Titan"**, in der App änderbar). Alles andere wird ignoriert. Nach dem Aktivierungswort kommt ein Ton, dann innerhalb von 9 Sekunden **ein** Befehl. Verb vorne oder hinten geht beides: "öffne Spotify" oder "Spotify öffnen".
 
 | Befehl | Wirkung |
 |---|---|
-| öffne / starte *App* | App öffnen |
-| schließe *App* | App beenden |
+| öffne *App* / *App* öffnen / mach *App* auf | App öffnen |
+| schließe *App* / *App* schließen / *App* zu | App beenden |
 | schließe diese App | App im Vordergrund beenden (stört eine App → einfach das sagen) |
 | schließe alle Apps | Übersicht öffnen und alles schließen |
 | tippe auf / klicke *Text* | Schaltfläche mit diesem Text in der offenen App antippen |
