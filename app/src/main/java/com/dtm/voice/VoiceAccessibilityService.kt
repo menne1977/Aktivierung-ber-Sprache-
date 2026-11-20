@@ -123,14 +123,16 @@ class VoiceAccessibilityService : AccessibilityService() {
 
     /** Oeffnet die App-Info und tippt "Beenden erzwingen" + Bestaetigung, danach zurueck. */
     fun forceStop(pkg: String, done: (Boolean) -> Unit) {
-        try {
+        dump = ""
+        fun openInfo(): Boolean = try {
             startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
             )
-        } catch (e: Exception) {
-            done(false); return
-        }
+            true
+        } catch (e: Exception) { false }
+        if (!openInfo()) { done(false); return }
+        var relaunched = 0
         var step = 0          // 0 = Knopf suchen, 1 = Bestaetigung suchen
         var tries = 0
         var finished = false
@@ -151,6 +153,12 @@ class VoiceAccessibilityService : AccessibilityService() {
             override fun run() {
                 tries++
                 val roots = allRoots()
+                if (roots.none { inSettings(it) } && step == 0 && relaunched < 2 && tries in setOf(7, 15)) {
+                    // Ein System-Fenster (z. B. Mikrofon-Hinweis) verdeckt die Einstellungen: wegdruecken und neu oeffnen
+                    relaunched++
+                    back()
+                    handler.postDelayed({ openInfo() }, 500)
+                }
                 if (roots.any { inSettings(it) }) {
                     if (step == 0) {
                         val node = findClickable(roots, listOf("erzwingen", "force stop", "force-stop", "forcestop"))

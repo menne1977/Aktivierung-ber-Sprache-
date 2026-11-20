@@ -197,12 +197,21 @@ object Commander {
         if (pkg in NEVER || pkg == ctx.packageName) { reply("$lbl kann nicht geschlossen werden"); return true }
         if (pkg in Prefs.disabled(ctx)) { reply("$lbl ist gesperrt"); return true }
 
-        try { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).killBackgroundProcesses(pkg) } catch (_: Exception) {}
-        // bis zu zwei Versuche, falls die Einstellungen-Seite zu langsam war
-        a11y.forceStop(pkg) { ok1 ->
-            if (ok1) reply("$lbl geschlossen")
-            else a11y.forceStop(pkg) { ok2 -> reply(if (ok2) "$lbl geschlossen" else "$lbl ließ sich nicht schließen, Diagnose steht in der App") }
-        }
+        // 1) App in den Hintergrund schicken und ihren Prozess direkt beenden (schnell, ohne Einstellungen)
+        val wasFront = a11y.currentPkg() == pkg
+        if (wasFront) a11y.home()
+        fun kill() = try { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).killBackgroundProcesses(pkg) } catch (_: Exception) {}
+        main.postDelayed({
+            kill()
+            // 2) Danach "Beenden erzwingen" in der App-Info (beendet auch Hintergrunddienste, z. B. Musik)
+            a11y.forceStop(pkg) { ok1 ->
+                if (ok1) { kill(); reply("$lbl geschlossen") }
+                else a11y.forceStop(pkg) { ok2 ->
+                    kill()
+                    reply(if (ok2) "$lbl geschlossen" else "$lbl im Hintergrund beendet, Erzwingen-Knopf nicht gefunden")
+                }
+            }
+        }, if (wasFront) 800L else 0L)
         return true
     }
 }
