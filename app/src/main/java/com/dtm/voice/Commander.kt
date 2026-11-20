@@ -201,7 +201,7 @@ object Commander {
         // bis zu zwei Versuche, falls die Einstellungen-Seite zu langsam war
         a11y.forceStop(pkg) { ok1 ->
             if (ok1) reply("$lbl geschlossen")
-            else a11y.forceStop(pkg) { ok2 -> reply(if (ok2) "$lbl geschlossen" else "$lbl läuft nicht oder ließ sich nicht schließen") }
+            else a11y.forceStop(pkg) { ok2 -> reply(if (ok2) "$lbl geschlossen" else "$lbl ließ sich nicht schließen, Diagnose steht in der App") }
         }
         return true
     }

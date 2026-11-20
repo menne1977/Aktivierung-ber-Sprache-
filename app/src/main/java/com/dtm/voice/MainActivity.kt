@@ -200,6 +200,7 @@ class MainActivity : Activity() {
         val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start eingerichtet)"
         statusView.text = statusView.text.toString() + "\n" + model
         if (VoiceService.lastHeard.isNotEmpty()) statusView.text = statusView.text.toString() + "\nZuletzt gehört: " + VoiceService.lastHeard + " → " + VoiceService.lastReply
+        if (VoiceAccessibilityService.dump.isNotEmpty()) statusView.text = statusView.text.toString() + "\n\nSchließen klappte nicht. Das war auf dem Bildschirm (bitte Screenshot an Claude):\n" + VoiceAccessibilityService.dump
         startStop.text = if (VoiceService.running) "Sprachsteuerung stoppen" else "Sprachsteuerung starten"
     }
 

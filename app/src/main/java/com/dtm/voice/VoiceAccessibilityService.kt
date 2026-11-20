@@ -1,6 +1,9 @@
 package com.dtm.voice
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.graphics.Rect
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -20,6 +23,8 @@ class VoiceAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile var instance: VoiceAccessibilityService? = null
         @Volatile var lastPkg: String? = null
+        /** Was zuletzt auf der Einstellungen-Seite zu sehen war, falls das Schliessen nicht klappte. */
+        @Volatile var dump: String = ""
 
         // Texte je nach Hersteller (Pixel, Samsung, Xiaomi, Motorola ...)
         private val FORCE = listOf(
@@ -116,7 +121,7 @@ class VoiceAccessibilityService : AccessibilityService() {
         return ok
     }
 
-    /** Oeffnet die App-Info und tippt "Beenden erzwingen" + OK, danach zurueck. */
+    /** Oeffnet die App-Info und tippt "Beenden erzwingen" + Bestaetigung, danach zurueck. */
     fun forceStop(pkg: String, done: (Boolean) -> Unit) {
         try {
             startActivity(
@@ -126,37 +131,50 @@ class VoiceAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             done(false); return
         }
-        var step = 0
+        var step = 0          // 0 = Knopf suchen, 1 = Bestaetigung suchen
         var tries = 0
         var finished = false
+        fun leave() {
+            // aus den Einstellungen herausgehen, notfalls bis zum Startbildschirm
+            handler.postDelayed({ back() }, 300)
+            handler.postDelayed({ if (inSettingsNow()) back() }, 1000)
+            handler.postDelayed({ if (inSettingsNow()) home() }, 1700)
+        }
         fun finish(ok: Boolean) {
             if (finished) return
             finished = true
-            handler.postDelayed({ back() }, 350)
+            if (!ok) dump = dumpScreen()
+            leave()
             done(ok)
         }
         val r = object : Runnable {
             override fun run() {
                 tries++
-                val root = rootInActiveWindow
-                if (root != null && inSettings(root)) {
+                val roots = allRoots()
+                if (roots.any { inSettings(it) }) {
                     if (step == 0) {
-                        when (findButton(root, FORCE)) {
-                            ButtonState.ENABLED -> { if (clickAny(root, FORCE)) step = 1 }
-                            ButtonState.DISABLED -> { finish(false); return }   // App laeuft gar nicht
-                            ButtonState.NONE -> {}
+                        val node = findClickable(roots, listOf("erzwingen", "force stop", "force-stop", "forcestop"))
+                        if (node != null) {
+                            if (!node.isEnabled) { finish(false); return }   // App laeuft nicht (Knopf grau)
+                            if (press(node)) { step = 1; tries = 0 }
+                        } else if (tries % 5 == 0) {
+                            roots.firstNotNullOfOrNull { findScrollable(it) }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                         }
                     } else {
-                        if (clickAny(root, CONFIRM)) { finish(true); return }
-                        // manche Handys fragen nicht nach: Knopf ist dann schon grau
-                        if (tries > 8 && findButton(root, FORCE) == ButtonState.DISABLED) { finish(true); return }
+                        val ok = findClickable(roots, listOf("ok", "erzwingen", "force stop", "stoppen"), exact = setOf("ok"))
+                        if (ok != null && ok.isEnabled && press(ok)) { finish(true); return }
+                        if (tries > 6) {
+                            // kein Dialog mehr, Knopf ist grau -> App ist beendet
+                            val again = findClickable(roots, listOf("erzwingen", "force stop"))
+                            if (again != null && !again.isEnabled) { finish(true); return }
+                        }
                     }
                 }
                 if (tries > 30) { finish(step == 1); return }
                 handler.postDelayed(this, 300)
             }
         }
-        handler.postDelayed(r, 700)
+        handler.postDelayed(r, 900)
     }
 
     /** Uebersicht oeffnen und "Alle schliessen" druecken. */
@@ -185,9 +203,76 @@ class VoiceAccessibilityService : AccessibilityService() {
 
     // ---------- Hilfsfunktionen ----------
 
-    private enum class ButtonState { NONE, ENABLED, DISABLED }
+    private fun allRoots(): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>()
+        try { rootInActiveWindow?.let { out.add(it) } } catch (_: Exception) {}
+        try { windows?.forEach { w -> w.root?.let { out.add(it) } } } catch (_: Exception) {}
+        return out
+    }
 
-    /** Klickbares Element zu einem Text: das Element selbst oder ein Elternelement. */
+    private fun inSettingsNow(): Boolean = allRoots().any { inSettings(it) }
+
+    private fun walk(n: AccessibilityNodeInfo, f: (AccessibilityNodeInfo) -> Unit) {
+        f(n)
+        for (i in 0 until n.childCount) {
+            val c = try { n.getChild(i) } catch (_: Exception) { null } ?: continue
+            walk(c, f)
+        }
+    }
+
+    private fun label(n: AccessibilityNodeInfo): String =
+        ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).trim().lowercase()
+
+    /** Klickbares Element, dessen Text/Beschreibung eines der Woerter enthaelt (oder bei exact: genau gleich ist). */
+    private fun findClickable(roots: List<AccessibilityNodeInfo>, words: List<String>, exact: Set<String> = emptySet()): AccessibilityNodeInfo? {
+        var best: AccessibilityNodeInfo? = null
+        for (root in roots) {
+            walk(root) { n ->
+                if (best != null && best!!.isEnabled) return@walk
+                val l = label(n)
+                if (l.isEmpty()) return@walk
+                val hit = words.any { w -> if (w in exact) (n.text?.toString()?.trim()?.lowercase() == w || n.contentDescription?.toString()?.trim()?.lowercase() == w) else l.contains(w) }
+                if (!hit) return@walk
+                var cur: AccessibilityNodeInfo? = n
+                var d = 0
+                while (cur != null && d < 6) {
+                    if (cur.isClickable || cur.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
+                        if (best == null || (!best!!.isEnabled && cur.isEnabled)) best = cur
+                        break
+                    }
+                    cur = cur.parent
+                    d++
+                }
+            }
+        }
+        return best
+    }
+
+    /** Klick; wenn Android ihn nicht annimmt, ein Tipp auf die Mitte des Elements. */
+    private fun press(n: AccessibilityNodeInfo): Boolean {
+        if (n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        if (r.isEmpty) return false
+        val path = Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }
+        val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build()
+        return try { dispatchGesture(g, null, null) } catch (_: Exception) { false }
+    }
+
+    private fun dumpScreen(): String {
+        val sb = StringBuilder()
+        for (root in allRoots()) {
+            sb.append("[").append(root.packageName).append("] ")
+            var count = 0
+            walk(root) { n ->
+                val l = label(n)
+                if (l.isNotEmpty() && count < 40) { sb.append(l.take(30)).append(if (n.isClickable) "*" else "").append(" | "); count++ }
+            }
+            sb.append("\n")
+        }
+        return sb.toString().take(1500)
+    }
+
     private fun clickTarget(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         var cur: AccessibilityNodeInfo? = n
         var depth = 0
@@ -199,29 +284,16 @@ class VoiceAccessibilityService : AccessibilityService() {
         return null
     }
 
-    private fun findButton(root: AccessibilityNodeInfo, texts: List<String>): ButtonState {
-        var seen = false
-        for (t in texts) {
-            for (n in root.findAccessibilityNodeInfosByText(t) ?: continue) {
-                if (t.length <= 3 && n.text?.toString()?.trim()?.equals(t, true) != true) continue
-                val target = clickTarget(n) ?: continue
-                seen = true
-                if (target.isEnabled && n.isEnabled) return ButtonState.ENABLED
-            }
-        }
-        return if (seen) ButtonState.DISABLED else ButtonState.NONE
-    }
-
     private fun clickAny(root: AccessibilityNodeInfo, texts: List<String>): Boolean {
         for (t in texts) {
             val nodes = root.findAccessibilityNodeInfosByText(t) ?: continue
-            // exakte Treffer zuerst
             val sorted = nodes.sortedBy { if (it.text?.toString()?.equals(t, true) == true || it.contentDescription?.toString()?.equals(t, true) == true) 0 else 1 }
             for (n in sorted) {
+                if (t.length <= 3 && n.text?.toString()?.trim()?.equals(t, true) != true) continue
                 if (!n.isEnabled) continue
                 val target = clickTarget(n) ?: continue
                 if (!target.isEnabled) continue
-                if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+                if (press(target)) return true
             }
         }
         return false
