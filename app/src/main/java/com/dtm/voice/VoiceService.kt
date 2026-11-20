@@ -58,6 +58,14 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
     private var busy = false          // Phase 2 laeuft (Google)
     private var voskCommand = false   // Phase 2 laeuft (offline)
 
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (!running) return
+            if (!busy && !speaking && !voskCommand && wake == null) startWake()
+            handler.postDelayed(this, 15000)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -90,6 +98,7 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
         } catch (e: Exception) { null }
         tts = TextToSpeech(this, this)
         startWake()
+        handler.postDelayed(watchdog, 15000)
         return START_STICKY
     }
 
@@ -221,7 +230,7 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
                         if (cmd.isBlank()) return
                         voskCommand = false
                         handler.removeCallbacksAndMessages(cmdToken)
-                        execute(cmd)
+                        execute(listOf(cmd))
                     } else if (Wake.matches(this@VoiceService, t)) {
                         onWake()
                     }
@@ -266,9 +275,11 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun execute(text: String) {
-        lastHeard = text
-        Commander.run(this, text) { r -> handler.post { say(r) } }
+    private fun execute(cands: List<String>) {
+        lastHeard = cands.firstOrNull() ?: ""
+        // Sicherheitsnetz: bleibt eine Antwort aus, hoert die App trotzdem wieder zu
+        handler.postDelayed({ if (!speaking) startWake() }, 20000)
+        Commander.run(this, cands) { r -> handler.post { say(r) } }
     }
 
     private fun endGoogle() {
@@ -284,9 +295,9 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
         google = r
         r.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }
                 endGoogle()
-                if (text.isNullOrBlank()) startWake() else execute(text)
+                if (texts.isNullOrEmpty()) startWake() else execute(texts)
             }
             override fun onError(error: Int) {
                 endGoogle()
@@ -313,7 +324,7 @@ class VoiceService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offline)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         }
         try { r.startListening(i) } catch (_: Exception) { endGoogle(); startWake(); return }

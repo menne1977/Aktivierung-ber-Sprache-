@@ -98,6 +98,13 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         })
         box.addView(text("Ist der Schalter bei Bedienungshilfe grau oder „eingeschränkt“? Dann 2a drücken, oben rechts ⋮ antippen, „Eingeschränkte Einstellungen zulassen“ wählen und danach Schritt 2 wiederholen.", 13f, DIM))
+        box.addView(button("4. Akku-Optimierung aus (damit Android die App nicht beendet)") {
+            try {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+            } catch (e: Exception) {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+        })
         box.addView(button("3. Über anderen Apps einblenden erlauben") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
@@ -189,7 +196,7 @@ class MainActivity : Activity() {
 
     private fun refreshStatus() {
         fun ok(b: Boolean) = if (b) "✓" else "✗"
-        statusView.text = "Mikrofon ${ok(micGranted())}    Bedienungshilfe ${ok(a11yEnabled())}    Überlagerung ${ok(Settings.canDrawOverlays(this))}"
+        statusView.text = "Mikrofon ${ok(micGranted())}    Bedienungshilfe ${if (VoiceAccessibilityService.instance != null) "✓" else if (a11yEnabled()) "⚠ an, aber nicht verbunden: aus- und wieder einschalten" else "✗"}    Überlagerung ${ok(Settings.canDrawOverlays(this))}"
         val model = if (ModelManager.ready(this)) "Sprachmodell ✓" else if (ModelManager.downloading) modelMsg else "Sprachmodell ✗ (wird beim Start eingerichtet)"
         statusView.text = statusView.text.toString() + "\n" + model
         if (VoiceService.lastHeard.isNotEmpty()) statusView.text = statusView.text.toString() + "\nZuletzt gehört: " + VoiceService.lastHeard + " → " + VoiceService.lastReply

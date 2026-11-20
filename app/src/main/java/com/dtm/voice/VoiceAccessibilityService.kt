@@ -74,6 +74,14 @@ class VoiceAccessibilityService : AccessibilityService() {
         return lastPkg
     }
 
+    /** Paket des Fensters, das gerade wirklich vorne ist (ohne Rueckfall). */
+    fun topPkg(): String? = try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+
+    private fun inSettings(root: AccessibilityNodeInfo): Boolean {
+        val p = root.packageName?.toString() ?: return false
+        return p.contains("settings", true) || p.contains("packageinstaller", true) || p.contains("permissioncontroller", true)
+    }
+
     // ---------- Aktionen ----------
 
     fun back() = performGlobalAction(GLOBAL_ACTION_BACK)
@@ -131,7 +139,7 @@ class VoiceAccessibilityService : AccessibilityService() {
             override fun run() {
                 tries++
                 val root = rootInActiveWindow
-                if (root != null) {
+                if (root != null && inSettings(root)) {
                     if (step == 0) {
                         when (findButton(root, FORCE)) {
                             ButtonState.ENABLED -> { if (clickAny(root, FORCE)) step = 1 }
@@ -144,7 +152,7 @@ class VoiceAccessibilityService : AccessibilityService() {
                         if (tries > 8 && findButton(root, FORCE) == ButtonState.DISABLED) { finish(true); return }
                     }
                 }
-                if (tries > 25) { finish(step == 1); return }
+                if (tries > 30) { finish(step == 1); return }
                 handler.postDelayed(this, 300)
             }
         }
@@ -195,6 +203,7 @@ class VoiceAccessibilityService : AccessibilityService() {
         var seen = false
         for (t in texts) {
             for (n in root.findAccessibilityNodeInfosByText(t) ?: continue) {
+                if (t.length <= 3 && n.text?.toString()?.trim()?.equals(t, true) != true) continue
                 val target = clickTarget(n) ?: continue
                 seen = true
                 if (target.isEnabled && n.isEnabled) return ButtonState.ENABLED
